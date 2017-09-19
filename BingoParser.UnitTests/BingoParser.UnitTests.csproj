@@ -4,7 +4,7 @@
   <PropertyGroup>
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
     <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
-    <ProjectGuid>{7A50502F-A21C-4C51-BCDB-4CD3D0A3C66C}</ProjectGuid>
+    <ProjectGuid>{8171C06B-E29A-466D-98C6-AAD91A4512AE}</ProjectGuid>
     <OutputType>Library</OutputType>
     <AppDesignerFolder>Properties</AppDesignerFolder>
     <RootNamespace>BingoParser.UnitTests</RootNamespace>
@@ -41,7 +41,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\BingoParser\BingoParser.csproj">
-      <Project>{a57b60f4-84b5-4a41-bf79-1c606eac3bd1}</Project>
+      <Project>{629cc76b-d700-48cd-a65c-272e38f134f5}</Project>
       <Name>BingoParser</Name>
     </ProjectReference>
   </ItemGroup>
