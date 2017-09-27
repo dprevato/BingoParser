@@ -1,11 +1,11 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Data.OleDb;
 using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
+using static BingoParser.BulkImport;
 using static BingoParser.ParseArguments;
 
 namespace BingoParser
@@ -15,19 +15,20 @@ namespace BingoParser
     public static long RowsWritten = 0;
     public static string NULL { get; } = "-999";
     public static CultureInfo LocCulture { get; } = CultureInfo.CreateSpecificCulture("en-US");
+    public static string TsvFileName { get; set; }
+    public static string[] HeaderData { get; } = new[] {
+      "SourceTable",
+      "SourceFilter",
+      "GaugeDateTime",
+      "GaugeText",
+      "GaugeValue",
+      "GaugeTaken"
+    };
+    public static long TotalRowsWritten { get; set; } = 0;
 
-    static void Main(string[] args) {
-#if DEBUG
-      const string DbConnectionString =
-        @"Provider=SQLNCLI11;Server=Gandalf\SQLEXPRESS;Database=G2009-Test;Trusted_Connection=yes;";
-#else
-      const string DbConnectionString =
-        @"Provider=SQLNCLI11;Server=digheidro.master.local;Database=G2009-Test;User=RWUser;Password=iren2016;";
-#endif
+    public static void Main(string[] args) {
       LocCulture.DateTimeFormat.TimeSeparator = ":";
       LocCulture.DateTimeFormat.DateSeparator = "-";
-
-      var DbConnection = new OleDbConnection(DbConnectionString);
 
       GetInfo();
       Parse(args);
@@ -39,7 +40,11 @@ namespace BingoParser
 
       if (!Directory.Exists(OutputDirectory)) Directory.CreateDirectory(OutputDirectory);
 
+      TsvFileName = $"{OutputDirectory}\\{NormalOut}";
+
       ConvertAllInputFiles();
+
+      WriteAllInDatabase();
     }
 
     static void GetInfo() {
@@ -75,7 +80,8 @@ namespace BingoParser
         return;
       }
 
-      var destination = SetupDestinationStreamWriter($"{OutputDirectory}\\{NormalOut}");
+      TsvFileName = $"{OutputDirectory}\\{NormalOut}";
+      var destination = SetupDestinationStreamWriter(TsvFileName);
 
       foreach (var file in inputFiles) {
         if (new FileInfo(file).Length == 0) continue; // scarto i file vuoti
@@ -85,6 +91,7 @@ namespace BingoParser
       }
       destination.Close();
       destination.Dispose();
+      if (!Quiet) Console.WriteLine($"Sono state convertite in totale {TotalRowsWritten} righe.");
     }
 
     static List<string> GetInputFileList() {
@@ -100,15 +107,15 @@ namespace BingoParser
     static StreamWriter SetupDestinationStreamWriter(string dest) {
       if (File.Exists(dest)) File.Delete(dest);
       var destWriter = new StreamWriter(dest); // costante per tutto il ciclo
-      destWriter.WriteLine(
-        $"Site{Separator}PdmId{Separator}GaugeDateTime{Separator}RawValue{Separator}GaugeValue{Separator}GaugeTaken");
+      destWriter.WriteLine(String.Join(Separator, HeaderData));
       return destWriter;
     }
 
     static void ConvertSingleDBFFile(string file, TextWriter destination) {
       // Qui viene convertito un singolo file DBF e il risultato viene scritto nel file di destinazione
-      if (Quiet) Console.Write(".");
-      else Console.WriteLine(Path.GetFileNameWithoutExtension(file));
+      var fileName = Path.GetFileNameWithoutExtension(file);
+      RowsWritten = 0;
+      if (!Quiet) UpdateConsole(fileName, RowsWritten);
 
       var br = new BinaryReader(File.OpenRead(file));
       var buffer = br.ReadBytes(Marshal.SizeOf(typeof(DbfHeader))); // contiene i 32 byte dell'header
@@ -147,7 +154,7 @@ namespace BingoParser
 
         // Devo ricavare la data dall'ultima colonna; se questa è vuota, ricavo la data dalle prime due colonne. La data vale per tutti i valori
         // contenuti nelle colonne
-        var gdt = fieldData.Last();
+        var gdt = FormatDateForSql(fieldData.Last());
         if (gdt.Length == 0) {
           gdt = FormatDateForSql(fieldData[0], fieldData[1]);
         }
@@ -167,13 +174,30 @@ namespace BingoParser
             fieldData[col],
             Separator,
             DateTime.Today.ToString("yyyy-MM-dd")));
-          RowsWritten++;
+          if (!Quiet) {
+            RowsWritten++;
+            if (RowsWritten % 1000 == 0) UpdateConsole(fileName, RowsWritten);
+          }
         }
       }
-      // Il ciclo principale è terminato, chiudo gli stream
+      // Il ciclo principale è terminato, chiudo gli stream e aggiorno il contatore
+      if (!Quiet) {
+        UpdateConsole(fileName, RowsWritten);
+        Console.WriteLine();
+        TotalRowsWritten += RowsWritten;
+      }
       br.Close();
       br.Dispose();
       destination.Flush(); // destination resta aperto
+    }
+
+    public static void UpdateConsole(string fileName, long rows) {
+      if (rows == 0) {
+        Console.Write(fileName);
+      }
+      else {
+        Console.Write($"\r{fileName} - righe scritte: {rows.ToString().PadLeft(12)}");
+      }
     }
 
     static void ConvertSingleTextFile(String file, StreamWriter destination) {
@@ -182,28 +206,49 @@ namespace BingoParser
       // Ora il separatore è TAB, e i tracciati degli unici due file che contengono dati TSV sono i seguenti:
       // Site - Device - DateTime - GaugeValue
       // che sono le prime quattro colonne del file di destinazione. La quinta colonna è comunque aggiunta dal programma.
-      if (Quiet) Console.Write(".");
-      else Console.WriteLine(Path.GetFileNameWithoutExtension(file));
+      var fileName = Path.GetFileNameWithoutExtension(file);
+      RowsWritten = 0;
+      if (!Quiet) UpdateConsole(fileName, RowsWritten);
 
       using (var source = new StreamReader(file)) {
         while (!source.EndOfStream) {
           var line = source.ReadLine();
           if (line.Length == 0) continue;
-          line = GetCleanDataRow(line); // Contiene i 4 campi gia separati da tab
+          line = GetCleanDataRow(line); // Contiene 4 campi gia separati da tab: Channel, GaugeDateTime, RawValue, GaugeValue
           var fieldData = line.Split(new[] { Separator }, StringSplitOptions.None).ToList();
-
-
-          line = $"{line}{Separator}{DateTime.Today:yyyy-MM-dd}";
-          destination.WriteLine(line);
+          destination.WriteLine(String.Concat(
+            Path.GetFileNameWithoutExtension(file),
+            Separator,
+            fieldData[0],
+            Separator,
+            FormatDateForSql(fieldData[1]),
+            Separator,
+            fieldData[2],
+            Separator,
+            fieldData[3],
+            Separator,
+            DateTime.Today.ToString("yyyy-MM-dd")
+          ));
+          if (!Quiet) {
+            RowsWritten++;
+            if (RowsWritten % 1000 == 0) UpdateConsole(fileName, RowsWritten);
+          }
         }
+      }
+      if (!Quiet) {
+        UpdateConsole(fileName, RowsWritten);
+        Console.WriteLine();
+        TotalRowsWritten += RowsWritten;
       }
       destination.Flush();
     }
 
     public static string FormatDateForSql(string date, string time) {
       try {
-        return
-          $"{DateTime.ParseExact(date, "dd/MM/yyyy", LocCulture):yyyy-MM-dd} {time.Substring(0, 5)}";
+        if (date.Length == 12 && !date.Contains("/")) {
+          return FormatDateForSql(date);
+        }
+        return $"{DateTime.ParseExact(date, "dd/MM/yyyy", LocCulture):yyyy-MM-dd} {time.Substring(0, 5)}";
       }
       catch (FormatException) {
         return string.Empty;
@@ -211,14 +256,13 @@ namespace BingoParser
     }
 
     public static string FormatDateForSql(string datetime) {
-      var datePart = datetime.Substring(0, 8);
-      var timePart = datetime.Remove(0, 8).Insert(2, ":");
-
       try {
+        var datePart = datetime.Substring(0, 8);
+        var timePart = datetime.Remove(0, 8).Insert(2, ":");
         return
           $"{DateTime.ParseExact(datePart, "yyyyMMdd", LocCulture):yyyy-MM-dd} {timePart}";
       }
-      catch (FormatException) {
+      catch (Exception) {
         return string.Empty;
       }
     }
