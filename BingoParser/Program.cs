@@ -15,8 +15,8 @@ namespace BingoParser
     public static long RowsWritten = 0;
     public static string NULL { get; } = "-999";
     public static CultureInfo LocCulture { get; } = CultureInfo.CreateSpecificCulture("en-US");
-    public static string TsvFileName { get; set; }
-    public static string[] HeaderData { get; } = new[] {
+    public static List<string> TsvFileNames { get; set; }
+    public static string[] HeaderData { get; } = {
       "SourceTable",
       "SourceFilter",
       "GaugeDateTime",
@@ -24,6 +24,7 @@ namespace BingoParser
       "GaugeValue",
       "GaugeTaken"
     };
+
     public static long TotalRowsWritten { get; set; } = 0;
 
     public static void Main(string[] args) {
@@ -40,11 +41,9 @@ namespace BingoParser
 
       if (!Directory.Exists(OutputDirectory)) Directory.CreateDirectory(OutputDirectory);
 
-      TsvFileName = $"{OutputDirectory}\\{NormalOut}";
-
       ConvertAllInputFiles();
 
-      WriteAllInDatabase();
+      WriteAllTsvToServer();
     }
 
     static void GetInfo() {
@@ -65,8 +64,7 @@ namespace BingoParser
       Console.WriteLine(@"versione 1.0:");
       Console.WriteLine(@"- Versione iniziale.");
       Console.WriteLine(@"versione 1.2:");
-      Console.WriteLine(
-        @"- Aggiunta la creazione di un file di testo normalizzato per le misure provenienti da file DBF.");
+      Console.WriteLine(@"- Aggiunta la creazione di un file di testo normalizzato per le misure provenienti da file DBF.");
       Console.WriteLine(@"versione 2.0");
       Console.WriteLine(@"- Aggiunta la funzionalità di preimportazione.");
     }
@@ -80,17 +78,12 @@ namespace BingoParser
         return;
       }
 
-      TsvFileName = $"{OutputDirectory}\\{NormalOut}";
-      var destination = SetupDestinationStreamWriter(TsvFileName);
-
       foreach (var file in inputFiles) {
         if (new FileInfo(file).Length == 0) continue; // scarto i file vuoti
-        if (file.EndsWith(".DBF", StringComparison.InvariantCultureIgnoreCase)) ConvertSingleDBFFile(file, destination);
-        else if (file.EndsWith(".TXT", StringComparison.InvariantCultureIgnoreCase))
-          ConvertSingleTextFile(file, destination);
+        if (file.EndsWith(".DBF", StringComparison.InvariantCultureIgnoreCase)) ConvertSingleDBFFile(file);
+        else if (file.EndsWith(".TXT", StringComparison.InvariantCultureIgnoreCase) || file.EndsWith(".CSV", StringComparison.InvariantCultureIgnoreCase))
+          ConvertSingleTextFile(file);
       }
-      destination.Close();
-      destination.Dispose();
       if (!Quiet) Console.WriteLine($"Sono state convertite in totale {TotalRowsWritten} righe.");
     }
 
@@ -111,11 +104,12 @@ namespace BingoParser
       return destWriter;
     }
 
-    static void ConvertSingleDBFFile(string file, TextWriter destination) {
+    static void ConvertSingleDBFFile(string file) {
       // Qui viene convertito un singolo file DBF e il risultato viene scritto nel file di destinazione
       var fileName = Path.GetFileNameWithoutExtension(file);
       RowsWritten = 0;
       if (!Quiet) UpdateConsole(fileName, RowsWritten);
+      var destination = SetupDestinationStreamWriter($"{OutputDirectory}\\{fileName}.tsv");
 
       var br = new BinaryReader(File.OpenRead(file));
       var buffer = br.ReadBytes(Marshal.SizeOf(typeof(DbfHeader))); // contiene i 32 byte dell'header
@@ -188,19 +182,20 @@ namespace BingoParser
       }
       br.Close();
       br.Dispose();
-      destination.Flush(); // destination resta aperto
+      destination.Flush();
+      destination.Close();
     }
 
-    public static void UpdateConsole(string fileName, long rows) {
+    public static void UpdateConsole(string destination, long rows) {
       if (rows == 0) {
-        Console.Write(fileName);
+        Console.Write(destination);
       }
       else {
-        Console.Write($"\r{fileName} - righe scritte: {rows.ToString().PadLeft(12)}");
+        Console.Write($"\r{destination}: righe scritte {rows.ToString().PadLeft(12)}");
       }
     }
 
-    static void ConvertSingleTextFile(String file, StreamWriter destination) {
+    static void ConvertSingleTextFile(String file) {
       // In una futura versione, il codice può essere generalizzato specificando o ricavando dal file stesso informazioni come
       // numero di campi, separatore, header, ecc.
       // Ora il separatore è TAB, e i tracciati degli unici due file che contengono dati TSV sono i seguenti:
@@ -209,6 +204,8 @@ namespace BingoParser
       var fileName = Path.GetFileNameWithoutExtension(file);
       RowsWritten = 0;
       if (!Quiet) UpdateConsole(fileName, RowsWritten);
+
+      var destination = SetupDestinationStreamWriter($"{OutputDirectory}\\converted_{fileName}.tsv");
 
       using (var source = new StreamReader(file)) {
         while (!source.EndOfStream) {
@@ -241,6 +238,7 @@ namespace BingoParser
         TotalRowsWritten += RowsWritten;
       }
       destination.Flush();
+      destination.Close();
     }
 
     public static string FormatDateForSql(string date, string time) {
@@ -248,7 +246,8 @@ namespace BingoParser
         if (date.Length == 12 && !date.Contains("/")) {
           return FormatDateForSql(date);
         }
-        return $"{DateTime.ParseExact(date, "dd/MM/yyyy", LocCulture):yyyy-MM-dd} {time.Substring(0, 5)}";
+
+        return $"{DateTime.ParseExact(date, "dd/MM/yyyy", LocCulture):yyyy-MM-dd} {time.Substring(0, 5).Replace('.', ':')}";
       }
       catch (FormatException) {
         return string.Empty;
