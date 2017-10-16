@@ -167,7 +167,8 @@ namespace BingoParser
             Separator,
             fieldData[col],
             Separator,
-            DateTime.Today.ToString("yyyy-MM-dd")));
+            DateTime.Today.ToString("yyyy-MM-dd"))
+          );
           if (!Quiet) {
             RowsWritten++;
             if (RowsWritten % 1000 == 0) UpdateConsole(fileName, RowsWritten);
@@ -176,7 +177,7 @@ namespace BingoParser
       }
       // Il ciclo principale è terminato, chiudo gli stream e aggiorno il contatore
       if (!Quiet) {
-        UpdateConsole(fileName, RowsWritten);
+        if (RowsWritten > 0) UpdateConsole(fileName, RowsWritten);
         Console.WriteLine();
         TotalRowsWritten += RowsWritten;
       }

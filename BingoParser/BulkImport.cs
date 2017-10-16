@@ -1,8 +1,6 @@
 ﻿using GenericParsing;
 using System;
 using System.Configuration;
-using System.Data;
-using System.Data.OleDb;
 using System.Data.SqlClient;
 using System.IO;
 using static BingoParser.ParseArguments;
@@ -14,11 +12,8 @@ namespace BingoParser
   {
     // Qui si esegue la preimportazione in Giusto!2010
     public static string SetDbConnection() {
-#if DEBUG
-      return ConfigurationManager.ConnectionStrings["LocalConnection"].ConnectionString;
-#else
-      return ConfigurationManager.ConnectionStrings["ProductionConnection"].ConnectionString;
-#endif
+      return @"Server=Gandalf\SQLEXPRESS;Database=G2009P;Trusted_Connection=yes;";
+      // return ConfigurationManager.ConnectionStrings["DbConnection"].ConnectionString;
     }
 
     public static long RecordsWritten { get; set; }
@@ -26,7 +21,7 @@ namespace BingoParser
     public static void WriteAllTsvToServer() {
       RecordsWritten = 0;
       foreach (var file in Directory.GetFiles(OutputDirectory, "*.tsv")) WriteSingleTsvToServer(file);
-      UpdateConsole("Numro totale di righe trasferite", RecordsWritten);
+      UpdateConsole("Numero totale di righe trasferite", RecordsWritten);
     }
 
     static void WriteSingleTsvToServer(string file) {
@@ -39,22 +34,6 @@ namespace BingoParser
         bcp.BulkCopyTimeout = 600;
         bcp.WriteToServer(dt);
         RecordsWritten += dt.Rows.Count;
-      }
-    }
-
-    static void TestWriteSingleTsvToServer(string file) {
-      using (var parser = new GenericParserAdapter(file) { ColumnDelimiter = Separator[0], FirstRowHasHeader = true }) {
-        var dt = parser.GetDataTable();
-        var connection = new OleDbConnection(SetDbConnection());
-        connection.Open();
-        var InsertCommand = new OleDbCommand { CommandType = CommandType.Text, Connection = connection };
-        foreach (DataRow dataRow in dt.Rows) {
-          var cmdText = "INSERT INTO Misure.RawImportData (SourceTable, SourceFilter, GaugeDateTime, GaugeText, GaugeValue, GaugeTaken) VALUES (";
-          cmdText = $"{cmdText}'{dataRow[0]}', '{dataRow[1]}', '{dataRow[2]}', '{dataRow[3]}', {dataRow[4]}, '{dataRow[5]}')";
-          InsertCommand.CommandText = cmdText;
-          InsertCommand.ExecuteNonQuery();
-        }
-        connection.Close();
       }
     }
 
