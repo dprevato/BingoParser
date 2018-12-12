@@ -1,12 +1,7 @@
-﻿using GenericParsing;
-using System;
-using System.Configuration;
-using System.Data;
-using System.Data.SqlClient;
+﻿using System.Data.SqlClient;
 using System.IO;
-using System.Threading;
 using Anotar.NLog;
-using FileHelpers;
+using LumenWorks.Framework.IO.Csv;
 using static BingoParser.ParseArguments;
 using static BingoParser.Program;
 
@@ -16,38 +11,46 @@ namespace BingoParser
    {
       // Qui si esegue la preimportazione in Giusto!2010
       public static string GetDbConnection() {
+#if DEBUG
          return @"Server=Gandalf\SQLEXPRESS;Database=G2009-test;Trusted_Connection=yes;";
-         //return ConfigurationManager.ConnectionStrings["DbConnection"].ConnectionString;
+#else
+         return ConfigurationManager.ConnectionStrings["DbConnection"].ConnectionString;
+#endif
       }
 
       public static void WriteAllTsvToServer() {
          RowsWritten = 0;
-         foreach (var file in Directory.GetFiles(OutputDirectory, "*.tsv")) WriteSingleTsvToServer(file);
+         LogTo.Info($"Inizio Preimportazione.");
+         DeleteBulkImportTable();
+         WriteSingleTsvToServer($"{OutputDirectory}{OutputFile}");
+         UpdateConsole("\nNumero totale di righe trasferite", TotalRowsWritten);
+         LogTo.Info($"Preimportazione terminata.");
+      }
 
-         UpdateConsole("Numero totale di righe trasferite", RowsWritten);
-         LogTo.Trace($"Preimportazione terminata. Scritte in totale {RowsWritten} righe.");
+      private static void DeleteBulkImportTable() {
+         using (var connection = new SqlConnection(GetDbConnection())) {
+            var cmd = new SqlCommand($"TRUNCATE TABLE {BulkImportTableName};", connection);
+            connection.Open();
+            cmd.ExecuteNonQuery();
+         }
+         LogTo.Trace(@"Vuotata la tabella di preimportazione.");
       }
 
       [LogToErrorOnException]
       private static void WriteSingleTsvToServer(string file) {
-         var dt = new DataTable();
-         using (var parser = new GenericParserAdapter(file) { ColumnDelimiter = Separator[0], FirstRowHasHeader = true })
-            dt = parser.GetDataTable();
+         using (var sr = new StreamReader(file))
+         using (var dt = new CsvReader(sr, true, Separator[0]))
          using (var bcp = new SqlBulkCopy(GetDbConnection()))
          {
-            bcp.BatchSize = 10000;
             bcp.DestinationTableName = "Misure.RawImportData";
             bcp.NotifyAfter = 10000;
             bcp.SqlRowsCopied += ShowBulkCopyActivity;
-            bcp.BulkCopyTimeout = 600;
+            bcp.BulkCopyTimeout = 3600;
             bcp.WriteToServer(dt);
          }
-
-         RowsWritten += dt.Rows.Count;
-         LogTo.Trace($"Riversato il file {file} nel database. Scritte sinora {RowsWritten} righe.");
       }
 
-      static void ShowBulkCopyActivity(object sender, SqlRowsCopiedEventArgs e) {
+      private static void ShowBulkCopyActivity(object sender, SqlRowsCopiedEventArgs e) {
          if (Quiet) return;
          UpdateConsole("Preimportazione", RowsWritten + e.RowsCopied);
       }

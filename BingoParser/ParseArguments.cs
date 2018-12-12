@@ -18,14 +18,15 @@ namespace BingoParser
    /// </summary>
    internal static class ParseArguments
    {
-      public static string InputDirectory { get; private set; }
-      public static string OutputDirectory { get; private set; }
-      public static string FilePattern { get; private set; }
-      public static List<string> FilePatterns { get; set; }
-      public static string Separator { get; private set; }
-      public static bool Quiet { get; private set; }
-      public static string OutputFile { get; private set; }
-      public static bool ExcludeNulls { get; private set; }
+      internal static string InputDirectory { get; private set; }
+      internal static string OutputDirectory { get; private set; }
+      internal static string FilePattern { get; private set; }
+      internal static List<string> FilePatterns { get; set; }
+      internal static string Separator { get; private set; }
+      internal static bool Quiet { get; private set; }
+      internal static string OutputFile { get; private set; }
+      internal static bool ExcludeNulls { get; private set; }
+      internal static string BulkImportTableName { get; private set; }
 
       /// <summary>
       /// Riceve il vettore di opzioni della riga di comando, lo interpreta e assegna i valori ai membri
@@ -41,15 +42,14 @@ namespace BingoParser
          InputDirectory = @".\"; //  Questo è il valore di default, che rimane se nel ciclo non succede niente
 #endif
          foreach (var v in args) {
-            if (!v.StartsWith(@"-in=") && !v.StartsWith(@"/in=")) continue;
+            if (!Regex.IsMatch(v, @"^[-/][iI][nN]=.+$")) continue;
             if (Directory.Exists(v.Substring(4))) InputDirectory = v.Substring(4);
          }
          if (!InputDirectory.EndsWith(@"\")) InputDirectory += @"\";
 
          OutputDirectory = $"{InputDirectory}"; // Il file di destinazione viene scritto nella stessa directory dove si trovano i file di input
          foreach (var v in args) {
-            if (!v.StartsWith(@"-out=") && !v.StartsWith(@"/out=")) continue;
-            OutputDirectory = v.Substring(5);
+            if (Regex.IsMatch(v, @"^[-/][Oo][Uu][Tt]=.+$")) OutputDirectory = v.Substring(5);
             if (Directory.Exists(OutputDirectory)) Directory.Delete(OutputDirectory, true);
          }
          if (!OutputDirectory.EndsWith(@"\")) OutputDirectory += @"\";
@@ -83,6 +83,11 @@ namespace BingoParser
          ExcludeNulls = true;
          foreach (var v in args) {
             if (v == "-all" || v == "/all") ExcludeNulls = false;
+         }
+
+         BulkImportTableName = "Misure.RawImportData";
+         foreach (var v in args) {
+            if (Regex.IsMatch(v, @"^[-/][Tt]=.+$")) BulkImportTableName = v.Substring(3);
          }
       }
    }

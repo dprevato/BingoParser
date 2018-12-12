@@ -1,16 +1,12 @@
-﻿using System;
+﻿using Anotar.NLog;
+using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
-using Anotar.NLog;
-using NLog;
-using NLog.Layouts;
-using NLog.Targets;
 using static BingoParser.BulkImport;
 using static BingoParser.ParseArguments;
 
@@ -29,7 +25,7 @@ namespace BingoParser
       /// </summary>
       internal static string RowExpectedFormat { get; } = @"^\w+\s*[,;]?\s*(19|20)\d\d[- /.]?(0[1-9]|1[012])[- /.]?(0[1-9]|[12][0-9]|3[01])[T ]?([01][1-9]|2[0123]):?([0-5][0-9]):?([0-5][0-9])?\s*[,;]?\s*[-+]?[0-9]*[,\.]?[0-9]+\s*[,;]?\s*[-+]?[0-9]*[,\.]?[0-9]+.*?$";
       internal static CultureInfo LocCulture { get; } = CultureInfo.CreateSpecificCulture("en-US");
-      internal static string[] HeaderData { get; } = {
+      internal static string[] HeaderData { get; } = { 
                                                       "SourceTable",
                                                       "SourceFilter",
                                                       "GaugeDateTime",
@@ -52,7 +48,7 @@ namespace BingoParser
 #else
          var logConfig = new NLog.Config.LoggingConfiguration();
          var logFile = new FileTarget("logfile") {
-                                                    FileName = @"${currentdir}/BingoParser_${shortdate}.log",
+                                                    FileName = @"${currentdir}/Logs/Log_${shortdate}.log",
                                                     Layout = @"${longdate} ${uppercase:${level}} ${message}"
                                                  };
          logConfig.AddTarget(logFile);
@@ -95,8 +91,11 @@ namespace BingoParser
          Console.WriteLine(@"- Versione iniziale.");
          Console.WriteLine(@"versione 1.2:");
          Console.WriteLine(@"- Aggiunta la creazione di un file di testo normalizzato per le misure provenienti da file DBF.");
-         Console.WriteLine(@"versione 2.0");
+         Console.WriteLine(@"versione 2.0:");
          Console.WriteLine(@"- Aggiunta la funzionalità di preimportazione.");
+         Console.WriteLine(@"versione 3.0 (2018):");
+         Console.WriteLine(@"- Implementato logging degli eventi di applicazione;");
+         Console.WriteLine(@"- Generalizzato l'input: qualsiasi file di testo (default: *.txt;*.csv) viene letto alla ricerca di misure valide.");
       }
 
       // Fase 1:  in questo ciclo vengono letti tutti i file di input e il loro contenuto viene scritto nel file di destinazione, che poi verrà
@@ -104,13 +103,14 @@ namespace BingoParser
       [LogToErrorOnException]
       internal static void ConvertAllInputFiles() {
          var inputFiles = GetInputFileList(InputDirectory);
+         LogTo.Trace($"Inizio conversione.");
          if (!inputFiles.Any()) {
             Console.WriteLine($"Nella directory {InputDirectory} non esistono file del tipo richiesto.");
-            LogTo.Error($"Non ho trovato file del tipo richiesto nella directory {InputDirectory}");
+            LogTo.Error($"Nessun file del tipo richiesto nella directory {InputDirectory}");
             return;
          }
-
          LogTo.Trace($"Trovati {inputFiles.Count} files nella directory {InputDirectory}");
+         OutputStream = SetOutputStreamWriter($"{OutputDirectory}\\{OutputFile}");
 
          foreach (var file in inputFiles) {
             if (new FileInfo(file).Length == 0) continue; // scarto i file vuoti
@@ -120,17 +120,19 @@ namespace BingoParser
                ConvertSingleTextFile(file);
          }
 
+         OutputStream.Flush();
+         OutputStream.Close();
          if (!Quiet) Console.WriteLine($"Sono state convertite in totale {TotalRowsWritten} righe.");
 
-         LogTo.Trace($"Terminata la conversione di tutti i file.");
+         LogTo.Trace($"Conversione terminata - convertite {TotalRowsWritten} righe.\n");
       }
 
       private static void DeleteAllTsvFiles() {
          var files = Directory.GetFiles(OutputDirectory, "*.tsv");
          foreach (var f in files) {
-            File.Delete(f);
+            if(f != OutputFile) File.Delete(f);
          }
-         LogTo.Trace($"Eliminati {files.Length} files TSV da precedente importazione.");
+         LogTo.Trace($"File temporanei eliminati.\n");
       }
 
       internal static List<string> GetInputFileList(string inputDir) {
@@ -145,6 +147,7 @@ namespace BingoParser
          return inputFiles;
       }
 
+      [LogToErrorOnException]
       private static StreamWriter SetOutputStreamWriter(string dest) {
          if (File.Exists(dest)) File.Delete(dest);
          var destWriter = new StreamWriter(dest); // costante per tutto il ciclo
@@ -164,11 +167,11 @@ namespace BingoParser
          var handle = GCHandle.Alloc(buffer, GCHandleType.Pinned);
          var header = (DbfHeader) Marshal.PtrToStructure(handle.AddrOfPinnedObject(), typeof(DbfHeader));
          handle.Free();
+
          //  Ora header contiene l'header del file DBF, in forma tale da poter accedere ai singoli campi che la compongono.
          //  Leggo adesso la lista delle colonne, che sono una serie di blocchi da 32 byte, che continua finché il prossimo
          //  byte nel file non vale 0x0D (13).
          var columns = new List<DbfColumnDescriptor>();
-         OutputStream = SetOutputStreamWriter($"{OutputDirectory}\\{fileName}.tsv");
          while (br.PeekChar() != 0x0d) {
             buffer = br.ReadBytes(Marshal.SizeOf(typeof(DbfColumnDescriptor)));
             handle = GCHandle.Alloc(buffer, GCHandleType.Pinned);
@@ -210,8 +213,7 @@ namespace BingoParser
                                                    Separator,
                                                    fieldData[col],
                                                    Separator,
-                                                   today)
-                                    );
+                                                   today) );
                if (!Quiet) {
                   RowsWritten++;
                   if (RowsWritten % 1000 == 0) UpdateConsole(fileName, RowsWritten);
@@ -229,9 +231,8 @@ namespace BingoParser
          br.Close();
          br.Dispose();
          OutputStream.Flush();
-         OutputStream.Close();
 
-         LogTo.Info($"Convertito il file {file} - scritte {RowsWritten} (Totale {TotalRowsWritten})");
+         LogTo.Info($"Convertito il file {file} - scritte {RowsWritten} righe (Totale {TotalRowsWritten}).");
       }
 
       internal static void UpdateConsole(string message, long rows) {
@@ -250,7 +251,6 @@ namespace BingoParser
          if (!Quiet) UpdateConsole(fileName, RowsWritten);
 
          var today = DateTime.Today.ToString("yyyy-MM-dd");
-         OutputStream = SetOutputStreamWriter($"{OutputDirectory}\\{fileName}.tsv");
 
          using (var source = new StreamReader(file)) {
             while (!source.EndOfStream) {
@@ -285,9 +285,8 @@ namespace BingoParser
          }
 
          OutputStream.Flush();
-         OutputStream.Close();
 
-         LogTo.Trace($"Convertito il file {file} - scritte {RowsWritten} (Totale {TotalRowsWritten})");
+         LogTo.Info($"Convertito il file {file} - scritte {RowsWritten} righe (Totale {TotalRowsWritten}).");
       }
 
       public static string FormatDateForSql(string date, string time) {
