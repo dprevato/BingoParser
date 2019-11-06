@@ -1,4 +1,6 @@
 ﻿using Anotar.NLog;
+using NLog;
+using NLog.Targets;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -64,9 +66,8 @@ namespace BingoParser
 
          if (!Directory.Exists(OutputDirectory)) Directory.CreateDirectory(OutputDirectory);
 
-         ConvertAllInputFiles();
+         //ConvertAllInputFiles();
          WriteAllTsvToServer();
-         DeleteAllTsvFiles();
 #if DEBUG
          Console.ReadLine();
 #endif
@@ -86,16 +87,17 @@ namespace BingoParser
          Console.WriteLine(@"-all esporta tutte le letture, anche quelle nulle (default: NO)");
          Console.WriteLine(@"-n=<NomeFileNormalizzato> nome del file contenente l'output normalizzato");
          Console.WriteLine(new string('-', 80));
-         Console.WriteLine(@"BingoSoft 2016-2018");
-         Console.WriteLine(@"versione 1.0:");
-         Console.WriteLine(@"- Versione iniziale.");
-         Console.WriteLine(@"versione 1.2:");
-         Console.WriteLine(@"- Aggiunta la creazione di un file di testo normalizzato per le misure provenienti da file DBF.");
-         Console.WriteLine(@"versione 2.0:");
-         Console.WriteLine(@"- Aggiunta la funzionalità di preimportazione.");
-         Console.WriteLine(@"versione 3.0 (2018):");
-         Console.WriteLine(@"- Implementato logging degli eventi di applicazione;");
-         Console.WriteLine(@"- Generalizzato l'input: qualsiasi file di testo (default: *.txt;*.csv) viene letto alla ricerca di misure valide.");
+         Console.WriteLine(@"Daniele Prevato 2016-2019");
+         Console.WriteLine(@"versione 1.0: (2016) Versione iniziale.");
+         Console.WriteLine(@"versione 1.2: (2016) Aggiunta la creazione di un file di testo normalizzato per le misure provenienti");
+         Console.WriteLine(@"                     dai vari impianti.");
+         Console.WriteLine(@"versione 2.0: (2017) Aggiunta la funzionalità di preimportazione");
+         Console.WriteLine(@"versione 3.0: (2019) Implementato il logging degli eventi di applicazione;");
+         Console.WriteLine(@"                     Generalizzato l'input: qualsiasi file di testo (default: *.txt;*.csv;*.dbf) viene letto");
+         Console.WriteLine(@"                     alla ricerca di misure valide.");
+         Console.WriteLine(@"versione 3.1: (2019) Aggiunta la data di preimportazione;");
+         Console.WriteLine(@"                     Il file tab-delimited di passaggio dei dati viene conservato al termine della procedura.");
+         Console.WriteLine();
       }
 
       // Fase 1:  in questo ciclo vengono letti tutti i file di input e il loro contenuto viene scritto nel file di destinazione, che poi verrà
@@ -113,7 +115,10 @@ namespace BingoParser
          OutputStream = SetOutputStreamWriter($"{OutputDirectory}\\{OutputFile}");
 
          foreach (var file in inputFiles) {
-            if (new FileInfo(file).Length == 0) continue; // scarto i file vuoti
+            if (new FileInfo(file).Length == 0) {
+               continue; // scarto i file vuoti
+            }
+
             if (file.EndsWith(".DBF", StringComparison.InvariantCultureIgnoreCase))
                ConvertSingleDbfFile(file);
             else
@@ -124,7 +129,7 @@ namespace BingoParser
          OutputStream.Close();
          if (!Quiet) Console.WriteLine($"Sono state convertite in totale {TotalRowsWritten} righe.");
 
-         LogTo.Trace($"Conversione terminata - convertite {TotalRowsWritten} righe.\n");
+         LogTo.Info($"Conversione terminata - convertite {TotalRowsWritten} righe.\n");
       }
 
       private static void DeleteAllTsvFiles() {
@@ -232,7 +237,7 @@ namespace BingoParser
          br.Dispose();
          OutputStream.Flush();
 
-         LogTo.Info($"Convertito il file {file} - scritte {RowsWritten} righe (Totale {TotalRowsWritten}).");
+         LogTo.Info($"Convertito il file {file} - righe scritte {RowsWritten} (righe totali {TotalRowsWritten}).");
       }
 
       internal static void UpdateConsole(string message, long rows) {
@@ -286,7 +291,7 @@ namespace BingoParser
 
          OutputStream.Flush();
 
-         LogTo.Info($"Convertito il file {file} - scritte {RowsWritten} righe (Totale {TotalRowsWritten}).");
+         LogTo.Info($"Convertito il file {file} - righe scritte {RowsWritten} (righe totali {TotalRowsWritten}).");
       }
 
       public static string FormatDateForSql(string date, string time) {
